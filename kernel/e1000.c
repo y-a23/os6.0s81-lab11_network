@@ -95,6 +95,26 @@ e1000_init(uint32 *xregs)
 int
 e1000_transmit(struct mbuf *m)
 {
+  acquire(&e1000_lock);
+  int index=regs[E1000_TDT];
+  if(((tx_ring[index].status)&E1000_TXD_STAT_DD)==0)
+  {
+    release(&e1000_lock);
+    return -1;
+  }
+
+  //struct mbuf * lastm=(struct mbuf*)tx_ring[index].addr;
+  if(tx_mbufs[index]!=0)mbuffree(tx_mbufs[index]);
+  tx_ring[index].addr=(uint64)m->head;
+  tx_ring[index].length=m->len;
+
+  tx_mbufs[index]=m;
+
+  tx_ring[index].cmd = E1000_TXD_CMD_RS | E1000_TXD_CMD_EOP;
+  regs[E1000_TDT] = (index + 1) % TX_RING_SIZE;
+  release(&e1000_lock);
+  return 0;
+
   //
   // Your code here.
   //
@@ -109,6 +129,21 @@ e1000_transmit(struct mbuf *m)
 static void
 e1000_recv(void)
 {
+  while(1)
+  {
+    int index=regs[E1000_RDT];
+    index=(index+1)%RX_RING_SIZE;
+    if((rx_ring[index].status&E1000_RXD_STAT_DD)==0)return;
+
+    rx_mbufs[index]->len = rx_ring[index].length;
+    net_rx(rx_mbufs[index]);
+    rx_mbufs[index] = mbufalloc(0);
+    
+    rx_ring[index].addr = (uint64)rx_mbufs[index]->head;
+    rx_ring[index].status = 0;
+    
+    regs[E1000_RDT] = index;
+  }
   //
   // Your code here.
   //
